@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">FlickrWalkTrackApp</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="permission_required">Permission ACCESS_FINE_LOCATION is required for app\'s functionality.</string>
+    <string name="internet_is_not_available">Internet is not available.</string>
+    <string name="gps_is_not_available">GPS is disabled. Please, turn it on.</string>
+</resources>
