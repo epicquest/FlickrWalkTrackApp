@@ -17,6 +17,6 @@ class Constants {
         const val DO_NOT_ADD_DUPLICATE_PHOTOS = false
         const val FLICKR_METHOD = "flickr.photos.search"
 
-        const val API_KEY = "[PUT YOUR API KEY HERE]"
+        const val API_KEY = "df7124806ed43561f055629c305ec588" //DO NOT COMMIT
     }
 }

@@ -9,6 +9,6 @@ data class FlickrPhotos(
     val perpage: Int,
     @Expose
     @SerializedName("photo")
-    val flickrPhoto: List<FlickrPhoto>,
+    val photos: List<FlickrPhoto>,
     val total: String
 )
