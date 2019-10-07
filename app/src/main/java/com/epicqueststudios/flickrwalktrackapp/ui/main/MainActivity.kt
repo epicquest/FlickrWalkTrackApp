@@ -2,54 +2,41 @@ package com.epicqueststudios.flickrwalktrackapp.ui.main
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Bundle
-import android.util.Log
+import android.os.IBinder
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.epicqueststudios.FlickrWalkApplication
-import com.epicqueststudios.flickrwalktrackapp.Constants
+import com.epicqueststudios.flickrwalktrackapp.GPSTrackService
 import com.epicqueststudios.flickrwalktrackapp.R
+import com.epicqueststudios.flickrwalktrackapp.database.LocationDatabase
 import com.epicqueststudios.flickrwalktrackapp.features.permission.IPermissionAskInterface
 import com.epicqueststudios.flickrwalktrackapp.features.permission.PermissionUtils
 import com.epicqueststudios.flickrwalktrackapp.features.permission.PermissionUtils.REQUEST_ACCESS_FINE_LOCATION
+import com.epicqueststudios.flickrwalktrackapp.interfaces.LocationAddedCallback
 import com.epicqueststudios.flickrwalktrackapp.model.FlickrPhoto
-import com.epicqueststudios.flickrwalktrackapp.model.FlickrPhotosResponseModel
-import com.epicqueststudios.flickrwalktrackapp.network.FlickrService
 import com.epicqueststudios.flickrwalktrackapp.ui.adapters.ImageAdapter
 import com.epicqueststudios.flickrwalktrackapp.utils.Utils
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
 import kotlinx.android.synthetic.main.activity_main.*
 import javax.inject.Inject
 
 class MainActivity : AppCompatActivity(), MainViewContract.View {
-    // warnings, check ne,gps, analitics
-    private var requestingLocationUpdates: Boolean = false
-    private lateinit var locationCallback: LocationCallback
-    private var lastLocation: Location? = null
+    private var gpsService: GPSTrackService? = null
     private var permissionActions: IPermissionAskInterface? = null
     private lateinit var adapter: ImageAdapter
     private val flickerPhotos: MutableList<FlickrPhoto> = mutableListOf()
 
     @Inject
-    lateinit var fusedLocationClient: FusedLocationProviderClient
-
-    @Inject
-    lateinit var locationRequest: LocationRequest
-
-    @Inject
-    lateinit var flickrService: FlickrService
-
     lateinit var presenter: MainActivityPresenter
-
-    private var running = false
 
     companion object {
         const val TAG = "flickrWalkTrack"
@@ -62,47 +49,48 @@ class MainActivity : AppCompatActivity(), MainViewContract.View {
         setContentView(R.layout.activity_main)
         injectDependencies()
 
-        presenter = MainActivityPresenter(flickrService)
-
-        initialiseRecyclerView()
-        initializeButtons()
-        initialiseGps()
-        updateValuesFromBundle(savedInstanceState)
+        initRecyclerView()
+        initButtons()
     }
+
 
     override fun onResume() {
         super.onResume()
         presenter.attach(this)
-        if (requestingLocationUpdates) startLocationUpdates()
+        bindGPSService()
+        presenter.loadData(LocationDatabase.getInstance(applicationContext))
     }
 
     override fun onPause() {
         super.onPause()
         presenter.detach()
-        stopLocationUpdates()
     }
 
-    private fun initializeButtons() {
+    override fun onDestroy() {
+        if (gpsService?.isRunning() == false) {
+            val intent = Intent(applicationContext, GPSTrackService::class.java)
+            applicationContext.stopService(intent)
+        }
+        super.onDestroy()
+    }
+
+    private fun bindGPSService() {
+        val intent = Intent(this.application, GPSTrackService::class.java)
+        application.startService(intent)
+        application.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    private fun initButtons() {
         btn_action.setOnClickListener {
             requestPermission()
+        }
+        btn_clear.setOnClickListener {
+            clearData()
         }
     }
 
     private fun injectDependencies() {
         (application as FlickrWalkApplication).appComponent.inject(this)
-    }
-
-    private fun updateValuesFromBundle(savedInstanceState: Bundle?) {
-        savedInstanceState ?: return
-
-        if (savedInstanceState.keySet().contains(Constants.REQUESTING_LOCATION_UPDATES_KEY)) {
-            requestingLocationUpdates = savedInstanceState.getBoolean(
-                Constants.REQUESTING_LOCATION_UPDATES_KEY
-            )
-        }
-        if (requestingLocationUpdates) {
-            updateButtonText(false)
-        }
     }
 
     private fun requestPermission() {
@@ -153,57 +141,30 @@ class MainActivity : AppCompatActivity(), MainViewContract.View {
         PermissionUtils.onRequestPermissionsResult(requestCode, grantResults, permissionActions)
     }
 
-    private fun initialiseGps() {
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult?) {
-                locationResult ?: return
-                if (locationResult.locations.isNotEmpty()) {
-                    val location = locationResult.locations[0]
-                    val distance: Float = lastLocation?.distanceTo(location) ?: Constants.MINIMUM_DISTANCE
-                    Log.d(TAG, "New location arrived: $location. Distance from previous: $distance")
-                    if (distance >= Constants.MINIMUM_DISTANCE) {
-                        lastLocation = location
-                        presenter.downloadPhotoForLocation(
-                            location.latitude,
-                            location.longitude
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private fun initialiseRecyclerView() {
+    private fun initRecyclerView() {
         linearLayoutManager = LinearLayoutManager(this, RecyclerView.VERTICAL, false)
         recycler_view.layoutManager = linearLayoutManager
         adapter = ImageAdapter(flickerPhotos)
         recycler_view.adapter = adapter
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean(Constants.REQUESTING_LOCATION_UPDATES_KEY, requestingLocationUpdates)
-        super.onSaveInstanceState(outState)
+    private fun clearData() {
+        presenter.clearData(LocationDatabase.getInstance(applicationContext))
+        adapter.clearImages()
     }
 
-    private fun stopLocationUpdates() {
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun startLocationUpdates() {
-        fusedLocationClient.requestLocationUpdates(
-            locationRequest,
-            locationCallback,
-            null
-        )
+    private fun updateButtonText(running: Boolean) {
+        btn_action.text = if (!running) getString(R.string.start) else getString(R.string.stop)
     }
 
     @SuppressLint("MissingPermission")
     fun doAction() {
-        if (running) {
-            stopUpdates()
-        } else {
-            startUpdates()
+        gpsService?.let {
+            if (it.isRunning()) {
+                stopUpdates()
+            } else {
+                startUpdates()
+            }
         }
     }
 
@@ -216,25 +177,49 @@ class MainActivity : AppCompatActivity(), MainViewContract.View {
             Toast.makeText(this@MainActivity, getString(R.string.gps_is_not_available), Toast.LENGTH_LONG).show()
             return
         }
-        updateButtonText(false)
-        running = true
-        startLocationUpdates()
+
+        gpsService?.startTracking()
+        updateButtonText(true)
     }
 
     private fun stopUpdates() {
-        updateButtonText(true)
-        stopLocationUpdates()
-        running = false
+        updateButtonText(false)
+        gpsService?.stopTracking()
     }
 
-    private fun updateButtonText(running: Boolean) {
-        btn_action.text = if (running) getString(R.string.start) else getString(R.string.stop)
+    override fun populatePhoto(photo: FlickrPhoto) {
+        adapter.addImage(photo)
     }
 
-    override fun populatePhotos(model: FlickrPhotosResponseModel?) {
-        model?.let {
-            if (it.flickrPhotos.flickrPhoto.isNotEmpty()) {
-                adapter.addImage(model.flickrPhotos.flickrPhoto[0])
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            val name = className.className
+            if (name == GPSTrackService::class.java.name) {
+                gpsService = (service as GPSTrackService.LocationServiceBinder).service
+                btn_action.isEnabled = true
+                gpsService?.let {
+                    updateButtonText(it.isRunning())
+
+                    it.setCallback(object : LocationAddedCallback {
+                        override fun onLocation(location: Location) {
+                            if (presenter.isAttached()) {
+                                presenter.downloadPhotoForLocation(
+                                    location.latitude,
+                                    location.longitude
+                                )
+                            }
+                        }
+                    })
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(className: ComponentName) {
+            if (className.className == GPSTrackService::class.java.name) {
+                btn_action.isEnabled = false
+                gpsService?.setCallback(null)
+                gpsService = null
+
             }
         }
     }

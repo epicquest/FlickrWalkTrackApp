@@ -42,6 +42,7 @@ class ImageAdapter(val photoList: MutableList<FlickrPhoto>) : RecyclerView.Adapt
         if (Constants.DO_NOT_ADD_DUPLICATE_PHOTOS && checkIfPhotoAlreadyPresentsInList(photo)) {
             return
         }
+        Log.d(MainActivity.TAG, "Adding photo: ${photo.id}")
         photoList.add(0, photo)
         notifyDataSetChanged()
     }
@@ -55,6 +56,11 @@ class ImageAdapter(val photoList: MutableList<FlickrPhoto>) : RecyclerView.Adapt
         }
         Log.d(MainActivity.TAG, "New photo found: ${photo.id}")
         return false
+    }
+
+    fun clearImages() {
+        photoList.clear()
+        notifyDataSetChanged()
     }
 
     class ImageHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
